@@ -161,3 +161,11 @@ func (t *ImmutableTree) nodeSize() int {
 	})
 	return size
 }
+
+// Preload loads the entire tree into memory.
+func (t *ImmutableTree) Preload() {
+	if t.root == nil {
+		return
+	}
+	t.ndb.LoadBranch(t.root)
+}

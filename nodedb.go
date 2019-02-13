@@ -153,6 +153,24 @@ func (ndb *nodeDB) SaveBranch(node *Node) []byte {
 	return node.hash
 }
 
+// LoadBranch recursively loads all descendants of the given node.
+func (ndb *nodeDB) LoadBranch(node *Node) {
+	// TODO: GetNode() acquires a lock every time, should implement lock-free version so the lock
+	//       can be acquired once before the whole branch is loaded.
+	if node.leftHash != nil {
+		if node.leftNode == nil {
+			node.leftNode = ndb.GetNode(node.leftHash)
+		}
+		ndb.LoadBranch(node.leftNode)
+	}
+	if node.rightHash != nil {
+		if node.rightNode == nil {
+			node.rightNode = ndb.GetNode(node.rightHash)
+		}
+		ndb.LoadBranch(node.rightNode)
+	}
+}
+
 // DeleteVersion deletes a tree version from disk.
 func (ndb *nodeDB) DeleteVersion(version int64, checkLatestVersion bool) {
 	ndb.mtx.Lock()
