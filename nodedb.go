@@ -90,6 +90,28 @@ func (ndb *nodeDB) GetNode(hash []byte) *Node {
 	return node
 }
 
+func (ndb *nodeDB) getNodeUnsafe(hash []byte) *Node {
+	if len(hash) == 0 {
+		panic("nodeDB.GetNode() requires hash")
+	}
+
+	// Doesn't exist, load.
+	buf := ndb.db.Get(ndb.nodeKey(hash))
+	if buf == nil {
+		panic(fmt.Sprintf("Value missing for hash %x corresponding to nodeKey %s", hash, ndb.nodeKey(hash)))
+	}
+
+	node, err := MakeNode(buf)
+	if err != nil {
+		panic(fmt.Sprintf("Error reading Node. bytes: %x, error: %v", buf, err))
+	}
+
+	node.hash = hash
+	node.persisted = true
+
+	return node
+}
+
 // SaveNode saves a node to disk.
 func (ndb *nodeDB) SaveNode(node *Node) {
 	ndb.mtx.Lock()
@@ -155,20 +177,83 @@ func (ndb *nodeDB) SaveBranch(node *Node) []byte {
 
 // LoadBranch recursively loads all descendants of the given node.
 func (ndb *nodeDB) LoadBranch(node *Node) {
-	// TODO: GetNode() acquires a lock every time, should implement lock-free version so the lock
-	//       can be acquired once before the whole branch is loaded.
+	ndb.mtx.Lock()
+	defer ndb.mtx.Unlock()
+
+	ndb.loadBranchUnsafe(node)
+}
+
+func (ndb *nodeDB) loadBranchUnsafe(node *Node) {
 	if node.leftHash != nil {
 		if node.leftNode == nil {
-			node.leftNode = ndb.GetNode(node.leftHash)
+			node.leftNode = ndb.getNodeUnsafe(node.leftHash)
 		}
-		ndb.LoadBranch(node.leftNode)
+		ndb.loadBranchUnsafe(node.leftNode)
 	}
 	if node.rightHash != nil {
 		if node.rightNode == nil {
-			node.rightNode = ndb.GetNode(node.rightHash)
+			node.rightNode = ndb.getNodeUnsafe(node.rightHash)
 		}
-		ndb.LoadBranch(node.rightNode)
+		ndb.loadBranchUnsafe(node.rightNode)
 	}
+}
+
+func (ndb *nodeDB) Visit(node *Node, depth uint8) int64 {
+	ndb.mtx.Lock()
+	defer ndb.mtx.Unlock()
+
+	return ndb.visitUnsafe(node, depth)
+}
+
+func (ndb *nodeDB) visitUnsafe(node *Node, depth uint8) int64 {
+	var leftCount, rightCount int64
+	if node.height == 1 {
+		return 1
+	} else if node.height == 0 {
+		panic("unexpected leaf node")
+	}
+
+	if depth == 5 {
+		var wg sync.WaitGroup
+		if node.leftHash != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				if node.leftNode == nil {
+					node.leftNode = ndb.getNodeUnsafe(node.leftHash)
+				}
+				leftCount = ndb.visitUnsafe(node.leftNode, depth+1)
+			}()
+		}
+		if node.rightHash != nil {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+
+				if node.rightNode == nil {
+					node.rightNode = ndb.getNodeUnsafe(node.rightHash)
+				}
+				rightCount = ndb.visitUnsafe(node.rightNode, depth+1)
+			}()
+		}
+		wg.Wait()
+	} else {
+		// skip the leaves
+		if node.leftHash != nil {
+			if node.leftNode == nil {
+				node.leftNode = ndb.getNodeUnsafe(node.leftHash)
+			}
+			leftCount = ndb.visitUnsafe(node.leftNode, depth+1)
+		}
+		if node.rightHash != nil {
+			if node.rightNode == nil {
+				node.rightNode = ndb.getNodeUnsafe(node.rightHash)
+			}
+			rightCount = ndb.visitUnsafe(node.rightNode, depth+1)
+		}
+	}
+	return 1 + leftCount + rightCount
 }
 
 // DeleteVersion deletes a tree version from disk.
