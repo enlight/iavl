@@ -320,6 +320,7 @@ func (t *ImmutableTree) getRangeProof(keyStart, keyEnd []byte, limit int) (proof
 	if t.root == nil {
 		return nil, nil, nil, nil
 	}
+	// TODO: This actually potentially mutates the nodes if the hashes aren't all precomputed.
 	t.root.hashWithCount() // Ensure that all hashes are calculated.
 
 	// Get the first key/value pair proof, which provides us with the left key.

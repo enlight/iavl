@@ -161,3 +161,19 @@ func (t *ImmutableTree) nodeSize() int {
 	})
 	return size
 }
+
+// Preload loads the entire tree into memory.
+func (t *ImmutableTree) Preload() {
+	if t.root == nil {
+		return
+	}
+	t.ndb.LoadBranch(t.root)
+}
+
+// Visit visits each internal node in the tree, and returns the number of nodes visited.
+func (t *ImmutableTree) Visit() int64 {
+	if t.root == nil {
+		return 0
+	}
+	return t.ndb.Visit(t.root, 0)
+}
